@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dual-Stream Mood Timeline - neuroanatomy.com</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card-bg: #161b22;
+      --border: #30363d;
+      --text-main: #f0f6fc;
+      --text-muted: #8b949e;
+      --valence-color: #38d39f;
+      --arousal-color: #fca311;
+    }
+
+    body {
+      margin: 0;
+      padding: 32px 16px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--bg);
+      color: var(--text-main);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .container {
+      max-width: 820px;
+      width: 100%;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 24px;
+      box-sizing: border-box;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    h2 {
+      margin: 0 0 4px 0;
+      font-size: 1.35rem;
+      letter-spacing: -0.02em;
+    }
+
+    p.subtitle {
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      margin: 0;
+    }
+
+    .legend {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      font-size: 0.82rem;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    .canvas-wrapper {
+      position: relative;
+      width: 100%;
+      height: 380px;
+      background: #11161d;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .controls {
+      margin-top: 18px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      background: #21262d;
+      color: var(--text-main);
+      border: 1px solid var(--border);
+      padding: 8px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 500;
+      transition: all 0.2s ease;
+    }
+
+    button:hover {
+      background: #30363d;
+      border-color: #8b949e;
+    }
+
+    button.clear {
+      margin-left: auto;
+      background: rgba(248, 81, 73, 0.1);
+      color: #f85149;
+      border-color: rgba(248, 81, 73, 0.3);
+    }
+
+    button.clear:hover {
+      background: rgba(248, 81, 73, 0.2);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <div class="header">
+      <div>
+        <h2>Weekly Dual-Stream Affect Map</h2>
+        <p class="subtitle">Autonomic Activation (Arousal) & Hedonic Tone (Valence) across 7 Days</p>
+      </div>
+      <div class="legend">
+        <div class="legend-item">
+          <div class="legend-dot" style="background: var(--valence-color);"></div>
+          <span>Valence (Pleasantness)</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-dot" style="background: var(--arousal-color);"></div>
+          <span>Arousal (Energy/Alertness)</span>
+        </div>
+      </div>
+    </div>
+    
+    <div class="canvas-wrapper">
+      <canvas id="streamCanvas"></canvas>
+    </div>
+
+    <div class="controls">
+      <button onclick="addLog('Excited')">+ Add Excited</button>
+      <button onclick="addLog('Anxious')">+ Add Anxious</button>
+      <button onclick="addLog('Calm')">+ Add Calm</button>
+      <button onclick="addLog('Depressed')">+ Add Sluggish</button>
+      <button onclick="addLog('Relieved')">+ Add Relieved</button>
+      <button class="clear" onclick="resetData()">Reset Week</button>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("streamCanvas");
+    const ctx = canvas.getContext("2d");
+
+    // Coordinates: [-1.0, +1.0] for both Valence and Arousal
+    const MOOD_COORDINATES = {
+      "Anxious":   { valence: -0.65, arousal:  0.80 },
+      "Excited":   { valence:  0.85, arousal:  0.75 },
+      "Calm":      { valence:  0.75, arousal: -0.60 },
+      "Depressed": { valence: -0.80, arousal: -0.70 },
+      "Relieved":  { valence:  0.60, arousal: -0.20 },
+      "Stressed":  { valence: -0.70, arousal:  0.65 }
+    };
+
+    const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+    let logs = [
+      { mood: "Anxious", dayIdx: 0, timeLabel: "Mon Morning" },
+      { mood: "Calm", dayIdx: 1.5, timeLabel: "Tue Afternoon" },
+      { mood: "Excited", dayIdx: 3, timeLabel: "Thu Morning" },
+      { mood: "Relieved", dayIdx: 4.2, timeLabel: "Fri Midday" },
+      { mood: "Calm", dayIdx: 5.5, timeLabel: "Sat Evening" }
+    ];
+
+    function resizeCanvas() {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      ctx.scale(dpr, dpr);
+      render();
+    }
+
+    window.addEventListener("resize", resizeCanvas);
+
+    function getY(val, height, padTop, padBot) {
+      const plotH = height - padTop - padBot;
+      // Invert: +1.0 top, -1.0 bottom
+      return padTop + ((1 - val) / 2) * plotH;
+    }
+
+    function getX(dayIdx, width, padLeft, padRight) {
+      const plotW = width - padLeft - padRight;
+      return padLeft + (dayIdx / 6) * plotW;
+    }
+
+    function drawGrid(w, h, pL, pR, pT, pB) {
+      ctx.clearRect(0, 0, w, h);
+
+      // Baseline Equilibrium Center Line (0.0)
+      const zeroY = getY(0, h, pT, pB);
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.12)";
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(pL, zeroY);
+      ctx.lineTo(w - pR, zeroY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Vertical Day Separators & Labels
+      for (let i = 0; i < 7; i++) {
+        const x = getX(i, w, pL, pR);
+        
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.05)";
+        ctx.beginPath();
+        ctx.moveTo(x, pT);
+        ctx.lineTo(x, h - pB);
+        ctx.stroke();
+
+        ctx.fillStyle = "#8b949e";
+        ctx.font = "12px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(DAYS[i], x, h - pB + 22);
+      }
+
+      // Y-Axis Indicators
+      ctx.fillStyle = "rgba(255, 255, 255, 0.25)";
+      ctx.font = "10px sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillText("+ High / Positive", pL, pT - 8);
+      ctx.fillText("- Low / Negative", pL, h - pB + 8);
+    }
+
+    function drawSmoothCurve(points, strokeColor, fillColor) {
+      if (points.length < 2) return;
+
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+
+      for (let i = 0; i < points.length - 1; i++) {
+        const xc = (points[i].x + points[i + 1].x) / 2;
+        const yc = (points[i].y + points[i + 1].y) / 2;
+        ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
+      }
+      ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
+
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = 3;
+      ctx.lineCap = "round";
+      ctx.stroke();
+    }
+
+    function render() {
+      const rect = canvas.getBoundingClientRect();
+      const w = rect.width;
+      const h = rect.height;
+      const pL = 40, pR = 40, pT = 40, pB = 45;
+
+      drawGrid(w, h, pL, pR, pT, pB);
+
+      if (logs.length === 0) return;
+
+      const valencePts = [];
+      const arousalPts = [];
+      const nodeMeta = [];
+
+      logs.forEach(item => {
+        const coords = MOOD_COORDINATES[item.mood] || { valence: 0, arousal: 0 };
+        const x = getX(item.dayIdx, w, pL, pR);
+        const yVal = getY(coords.valence, h, pT, pB);
+        const yArous = getY(coords.arousal, h, pT, pB);
+
+        valencePts.push({ x, y: yVal });
+        arousalPts.push({ x, y: yArous });
+        nodeMeta.push({ x, yVal, yArous, mood: item.mood, label: item.timeLabel });
+      });
+
+      // Draw synchronized continuous curves
+      drawSmoothCurve(valencePts, "#38d39f");
+      drawSmoothCurve(arousalPts, "#fca311");
+
+      // Draw Discrete Mood Markers & Connectors
+      nodeMeta.forEach(node => {
+        // Vertical connector linking both biological dimensions at this moment
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 2]);
+        ctx.beginPath();
+        ctx.moveTo(node.x, node.yVal);
+        ctx.lineTo(node.x, node.yArous);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Valence Point
+        ctx.beginPath();
+        ctx.arc(node.x, node.yVal, 5, 0, Math.PI * 2);
+        ctx.fillStyle = "#38d39f";
+        ctx.fill();
+        ctx.strokeStyle = "#11161d";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Arousal Point
+        ctx.beginPath();
+        ctx.arc(node.x, node.yArous, 5, 0, Math.PI * 2);
+        ctx.fillStyle = "#fca311";
+        ctx.fill();
+        ctx.strokeStyle = "#11161d";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Mood Label Badge (Midpoint)
+        const midY = (node.yVal + node.yArous) / 2;
+        ctx.fillStyle = "rgba(22, 27, 34, 0.85)";
+        const text = node.mood;
+        ctx.font = "11px sans-serif";
+        const txtWidth = ctx.measureText(text).width;
+        
+        ctx.fillRect(node.x - txtWidth/2 - 6, midY - 9, txtWidth + 12, 18);
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
+        ctx.strokeRect(node.x - txtWidth/2 - 6, midY - 9, txtWidth + 12, 18);
+
+        ctx.fillStyle = "#f0f6fc";
+        ctx.textAlign = "center";
+        ctx.fillText(text, node.x, midY + 4);
+      });
+    }
+
+    function addLog(moodName) {
+      const nextDayIdx = logs.length > 0 ? (logs[logs.length - 1].dayIdx + 1.2) % 6.5 : 0.5;
+      logs.push({
+        mood: moodName,
+        dayIdx: nextDayIdx,
+        timeLabel: `${DAYS[Math.floor(nextDayIdx)]} entry`
+      });
+      // Keep sorted chronologically
+      logs.sort((a, b) => a.dayIdx - b.dayIdx);
+      render();
+    }
+
+    function resetData() {
+      logs = [];
+      render();
+    }
+
+    // Init
+    setTimeout(resizeCanvas, 50);
+  </script>
+</body>
+</html>
